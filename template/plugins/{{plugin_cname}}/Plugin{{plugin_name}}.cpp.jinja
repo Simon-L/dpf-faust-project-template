@@ -33,12 +33,12 @@ START_NAMESPACE_DISTRHO
 // -----------------------------------------------------------------------
 
 Plugin{{plugin_name}}::Plugin{{plugin_name}}()
-    : Plugin({{plugin_name}}::NumParameters, presetCount, 0)  // # of params, # of programs, 0 states
+    : Plugin({{plugin_name}}::NumParametersPoly, presetCount, 0)  // # of params, # of programs, 0 states
 {
     dsp = new {{plugin_name}};
     fSampleRate = getSampleRate();
 
-    for (unsigned p = 0; p < {{plugin_name}}::NumParameters; ++p) {
+    for (unsigned p = 0; p < {{plugin_name}}::NumParametersPoly; ++p) {
         Parameter param;
         initParameter(p, param);
         setParameterValue(p, param.ranges.def);
@@ -53,6 +53,16 @@ Plugin{{plugin_name}}::~Plugin{{plugin_name}}() {
 // Init
 
 void Plugin{{plugin_name}}::initParameter(uint32_t index, Parameter& parameter) {
+    if (index == {{plugin_name}}::NumParametersPoly-1) // last index is panic
+    {
+        parameter.name = "PANIC";
+        parameter.shortName = "PANIC";
+        parameter.description = "PANIC";
+        parameter.symbol = "PANIC";
+        parameter.hints = kParameterIsTrigger;
+        return;
+    }
+
     if (index >= {{plugin_name}}::NumParameters)
         return;
 
@@ -145,7 +155,7 @@ float Plugin{{plugin_name}}::getParameterValue(uint32_t index) const {
   Change a parameter value.
 */
 void Plugin{{plugin_name}}::setParameterValue(uint32_t index, float value) {
-    if (index >= {{plugin_name}}::NumParameters)
+    if (index >= {{plugin_name}}::NumParametersPoly)
         return;
 
     const {{plugin_name}}::ParameterRange* range = dsp->parameter_range(index);
@@ -178,7 +188,8 @@ void Plugin{{plugin_name}}::activate() {
 
 {% set indent = " " * (plugin_name | length + 17) %}
 void Plugin{{plugin_name}}::run(const float** inputs, float** outputs,
-{{ indent}}uint32_t frames) {
+{{ indent}}uint32_t frames, const DISTRHO::MidiEvent* midiEvents, uint32_t midiEventsCount) {
+    if (midiEventsCount) dsp->processMidi((DistrhoMidiEvent*)midiEvents, midiEventsCount);
     dsp->process({% for i in range(num_inputs | int) %}inputs[{{ i}}], {% endfor %}{% for i in range(num_outputs | int) %}outputs[{{ i}}], {% endfor %}(unsigned)frames);
 }
 

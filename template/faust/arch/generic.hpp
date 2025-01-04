@@ -30,6 +30,100 @@
 
 #include <memory>
 #include <string>
+#include <iostream>
+
+#include "faust/dsp/dsp.h"
+#include "faust/dsp/poly-dsp.h"
+#include "faust/gui/meta.h"
+#include "faust/gui/UI.h"
+#include "faust/midi/midi.h"
+#include "faust/gui/MidiUI.h"
+#include "faust/gui/APIUI.h"
+
+struct DistrhoMidiEvent {
+    static constexpr const uint32_t kDataSize = 4;
+    uint32_t frame;
+    uint32_t size;
+    uint8_t        data[kDataSize];
+    const uint8_t* dataExt;
+};
+
+class dpf_midi : public midi_handler {
+public:
+    
+    void DumpEvent(const DistrhoMidiEvent* event)
+    {
+        uint8_t b0 = event->data[0]; // status + channel
+        uint8_t b1 = event->data[1]; // note
+        uint8_t b2 = event->data[2]; // velocity
+        printf("\tMIDI in 0x%x %d %d\n", b0, b1, b2);
+    }
+    
+    bool FindEvent(const DistrhoMidiEvent ev, const DistrhoMidiEvent* midiEvents, uint32_t midiEventsCount)
+    {
+        for (size_t i = 0; i < midiEventsCount; i++) {
+            if ((ev.data[0] == midiEvents[i].data[0]) && (ev.data[1] == midiEvents[i].data[1]) && (ev.data[2] == midiEvents[i].data[2]))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+    
+    void processMidiInBuffer(const DistrhoMidiEvent* midiEvents, uint32_t midiEventsCount)
+    {
+        DistrhoMidiEvent processed[midiEventsCount];
+        for (size_t m = 0; m < midiEventsCount; ++m) {
+
+            DistrhoMidiEvent event = midiEvents[m];
+            size_t nBytes = event.size;
+            int type = (int)event.data[0] & 0xf0;
+            int channel = (int)event.data[0] & 0x0f;
+            double time = event.frame; // Timestamp in frames
+            
+            // DumpEvent(&event);
+            
+            bool skip = false;
+            
+            if ((m > 0) && (FindEvent(event, processed, m)))
+            {
+                skip = true;
+            } else if ((midiEventsCount > 1) && (type == 0x90)) {
+                DistrhoMidiEvent event_off = event;
+                event_off.data[0] = channel | 0x80;
+                if (FindEvent(event_off, midiEvents, midiEventsCount))
+                {
+                    skip = true;
+                }
+            }
+            
+            if (!skip) {
+                // MIDI sync
+                if (nBytes == 1) {
+                    // handleSync(time, (int)event.data[0]);
+                } else if (nBytes == 2) {
+                    // handleData1(time, type, channel, (int)event.data[1]);
+                } else if (nBytes == 3) {
+                    handleData2(time, type, channel, (int)event.data[1], (int)event.data[2]);
+                } else {
+                    // std::vector<unsigned char> message(event.data, event.data + event.size);
+                    // handleMessage(time, type, message);
+                }
+                processed[m] = event;
+            }
+        }
+    }
+
+    dpf_midi(const std::string& name = "DPFHandler")
+        :midi_handler(name)
+    {
+    }
+    virtual ~dpf_midi()
+    {
+    }
+};
+
+
 
 class {{Identifier}} {
 public:
@@ -43,12 +137,15 @@ public:
         {%+ for i in range(inputs) %}const float *in{{i}}, {% endfor +%}
         {%+ for i in range(outputs) %}float *out{{i}}, {% endfor +%}
         unsigned count) noexcept;
+        
+    void processMidi(const DistrhoMidiEvent* midiEvents, uint32_t midiEventsCount);
 
     enum { NumInputs = {{inputs}} };
     enum { NumOutputs = {{outputs}} };
     enum { NumActives = {{active|length}} };
     enum { NumPassives = {{passive|length}} };
     enum { NumParameters = {{active|length + passive|length}} };
+    enum { NumParametersPoly = {{active|length + passive|length + 1}} };
 
     enum Parameter {
         {% for w in active + passive %}
@@ -88,7 +185,7 @@ public:
 
     float get_parameter(unsigned index) const noexcept;
     void set_parameter(unsigned index, float value) noexcept;
-
+    
     {% for w in active + passive %}
     float get_{{w.symbol}}() const noexcept;
     {% endfor %}
@@ -97,10 +194,13 @@ public:
     {% endfor %}
 
 public:
-    class BasicDsp;
+    // class BasicDsp;
 
 private:
-    std::unique_ptr<BasicDsp> fDsp;
+    std::unique_ptr<mydsp_poly> fDsp;
+    dpf_midi* dpf_midi_handler;
+    MidiUI* midi_interface;
+    APIUI* api;
 
 {% block ClassExtraDecls %}
 {% endblock %}

@@ -32,51 +32,51 @@
 #include <utility>
 #include <cmath>
 
-class {{Identifier}}::BasicDsp {
-public:
-    virtual ~BasicDsp() {}
-};
+// class {{Identifier}}::BasicDsp {
+// public:
+//     virtual ~BasicDsp() {}
+// };
+// 
+// //------------------------------------------------------------------------------
+// // Begin the Faust code section
+// 
+// namespace {
+// 
+// template <class T> inline T min(T a, T b) { return (a < b) ? a : b; }
+// template <class T> inline T max(T a, T b) { return (a > b) ? a : b; }
+// 
+// class Meta {
+// public:
+//     // dummy
+//     void declare(...) {}
+// };
+// 
+// class UI {
+// public:
+//     // dummy
+//     void openHorizontalBox(...) {}
+//     void openVerticalBox(...) {}
+//     void closeBox(...) {}
+//     void declare(...) {}
+//     void addButton(...) {}
+//     void addCheckButton(...) {}
+//     void addVerticalSlider(...) {}
+//     void addHorizontalSlider(...) {}
+//     void addVerticalBargraph(...) {}
+//     void addHorizontalBargraph(...) {}
+// };
+// 
+// typedef {{Identifier}}::BasicDsp dsp;
+// 
+// } // namespace
 
-//------------------------------------------------------------------------------
-// Begin the Faust code section
-
-namespace {
-
-template <class T> inline T min(T a, T b) { return (a < b) ? a : b; }
-template <class T> inline T max(T a, T b) { return (a > b) ? a : b; }
-
-class Meta {
-public:
-    // dummy
-    void declare(...) {}
-};
-
-class UI {
-public:
-    // dummy
-    void openHorizontalBox(...) {}
-    void openVerticalBox(...) {}
-    void closeBox(...) {}
-    void declare(...) {}
-    void addButton(...) {}
-    void addCheckButton(...) {}
-    void addVerticalSlider(...) {}
-    void addHorizontalSlider(...) {}
-    void addVerticalBargraph(...) {}
-    void addHorizontalBargraph(...) {}
-};
-
-typedef {{Identifier}}::BasicDsp dsp;
-
-} // namespace
-
-#define FAUSTDR_VIRTUAL // do not declare any methods virtual
-#define FAUSTDR_PRIVATE public // do not hide any members
-#define FAUSTDR_PROTECTED public // do not hide any members
+// #define FAUSTDR_VIRTUAL // do not declare any methods virtual
+// #define FAUSTDR_PRIVATE public // do not hide any members
+// #define FAUSTDR_PROTECTED public // do not hide any members
 
 // define the DSP in the anonymous namespace
-#define FAUSTDR_BEGIN_NAMESPACE namespace {
-#define FAUSTDR_END_NAMESPACE }
+#define FAUSTDR_BEGIN_NAMESPACE 
+#define FAUSTDR_END_NAMESPACE
 
 {% block ImplementationFaustCode %}
 #if defined(__GNUC__)
@@ -104,15 +104,26 @@ typedef {{Identifier}}::BasicDsp dsp;
 //------------------------------------------------------------------------------
 // End the Faust code section
 
+std::list<GUI*> GUI::fGuiList;
+ztimedmap GUI::gTimedZoneMap;
+
 {% block ImplementationBeforeClassDefs %}
 {% endblock %}
 
 {{Identifier}}::{{Identifier}}()
 {
 {% block ImplementationSetupDsp %}
-    {{classname}} *dsp = new {{classname}};
+    mydsp_poly *dsp = new mydsp_poly(new {{classname}}, 32, true, true);
     fDsp.reset(dsp);
-    dsp->instanceResetUserInterface();
+
+    fDsp->instanceResetUserInterface();
+    
+    dpf_midi_handler = new dpf_midi;
+    midi_interface = new MidiUI(dpf_midi_handler);
+    
+    api = new APIUI();
+    fDsp->buildUserInterface(api);
+    
 {% endblock %}
 }
 
@@ -123,17 +134,21 @@ typedef {{Identifier}}::BasicDsp dsp;
 void {{Identifier}}::init(float sample_rate)
 {
 {% block ImplementationInitDsp %}
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
-    dsp.classInit(sample_rate);
-    dsp.instanceConstants(sample_rate);
+
+    fDsp->instanceInit(sample_rate);
+    fDsp->instanceConstants(sample_rate);
     clear();
+
+    fDsp->init(sample_rate);
+    fDsp->buildUserInterface(midi_interface);
+
 {% endblock %}
 }
 
 void {{Identifier}}::clear() noexcept
 {
 {% block ImplementationClearDsp %}
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
+    mydsp_poly &dsp = static_cast<mydsp_poly &>(*fDsp);
     dsp.instanceClear();
 {% endblock %}
 }
@@ -144,15 +159,24 @@ void {{Identifier}}::process(
     unsigned count) noexcept
 {
 {% block ImplementationProcessDsp %}
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
     float *inputs[] = {
         {%+ for i in range(inputs) %}const_cast<float *>(in{{i}}), {% endfor +%}
     };
     float *outputs[] = {
         {%+ for i in range(outputs) %}out{{i}}, {% endfor +%}
     };
-    dsp.compute(count, inputs, outputs);
+    fDsp->compute(count, inputs, outputs);
 {% endblock %}
+}
+
+void {{Identifier}}::processMidi(const DistrhoMidiEvent* midiEvents, uint32_t midiEventsCount)
+{
+    dpf_midi_handler->processMidiInBuffer(midiEvents, midiEventsCount);
+    
+    if (midiEventsCount) {
+        GUI::updateAllGuis();
+    }
+    
 }
 
 int {{Identifier}}::parameter_group(unsigned index) noexcept
@@ -279,6 +303,7 @@ const char *{{Identifier}}::parameter_unit(unsigned index) noexcept
 
 const {{Identifier}}::ParameterRange *{{Identifier}}::parameter_range(unsigned index) noexcept
 {
+    if (index == NumParametersPoly-1) index = 0;
     switch (index) {
     {% for w in active + passive %}
     case {{loop.index0}}: {
@@ -393,47 +418,38 @@ bool {{Identifier}}::parameter_is_logarithmic(unsigned index) noexcept
 
 float {{Identifier}}::get_parameter(unsigned index) const noexcept
 {
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
-    switch (index) {
-    {% for w in active + passive %}
-    case {{loop.index0}}:
-        return dsp.{{w.varname}};
-    {% endfor %}
-    default:
-        (void)dsp;
-        return 0;
+    if (index == NumParametersPoly-1) // last parameter index is panic
+    {
+        return api->getParamValue(0); // but is first faust parameter
     }
+    
+    index++;
+    return api->getParamValue(index);
 }
 
 void {{Identifier}}::set_parameter(unsigned index, float value) noexcept
 {
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
-    switch (index) {
-    {% for w in active %}
-    case {{loop.index0}}:
-        dsp.{{w.varname}} = value;
-        break;
-    {% endfor %}
-    default:
-        (void)dsp;
-        (void)value;
-        break;
+    if (index == NumParametersPoly-1) // last parameter index is panic
+    {
+        api->setParamValue(0, value); // but is first faust parameter
+        return;
     }
+    index++;
+    api->setParamValue(index, value);
+    return;
 }
 
 {% for w in active + passive %}
 float {{Identifier}}::get_{{w.symbol}}() const noexcept
 {
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
-    return dsp.{{w.varname}};
+    return api->getParamValue({{ cstr(cid(w.symbol)) }});
 }
 
 {% endfor %}
 {% for w in active %}
 void {{Identifier}}::set_{{w.symbol}}(float value) noexcept
 {
-    {{classname}} &dsp = static_cast<{{classname}} &>(*fDsp);
-    dsp.{{w.varname}} = value;
+    api->setParamValue({{ cstr(cid(w.symbol)) }}, value);
 }
 
 {% endfor %}

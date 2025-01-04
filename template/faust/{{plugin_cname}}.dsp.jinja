@@ -5,6 +5,13 @@ declare license "{{project_license}}";
 
 import("stdfaust.lib");
 
-gain = hslider("[0] Gain [symbol: gain] [abbrev: gain] [unit: dB] [tooltip: Gain applied to output (-90.0..30.0 dB)]", -6.0, -90.0, 30.0, 0.1) : si.smoo;
+freq = hslider("freq",200,50,1000,0.01);
+gain = hslider("gain",0.5,0,1,0.01);
+gate = button("gate");
+attack = hslider("attack",0.01,0.0001,1.5,0.0001);
+decay = hslider("decay",0.01,0.0001,1.5,0.0001);
+sustain = hslider("sustain",0.8,0,1,0.001);
+release = hslider("release",0.1,0.0001,1.5,0.0001);
+envelope = en.adsr(attack, decay, sustain, release, gate)*gain;
+process = _ : ! : os.sawtooth(freq)*envelope : _;
 
-process = _ * ba.db2linear(gain);

@@ -1,5 +1,5 @@
-project_name: "DPF FAUST Gain"
-plugin_description: "A simple audio volume gain plugin"
+project_name: "DPF FAUST MIDI Synth"
+plugin_description: "A simple MIDI Synth plugin"
 author_name: "Joe Doe"
 domain: "example.com"
 github_username: "{{author_name | lower | replace(' ', '.')}}"

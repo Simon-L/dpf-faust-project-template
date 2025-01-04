@@ -115,7 +115,7 @@ protected:
     // Process
 
     void activate() override;
-    void run(const float**, float** outputs, uint32_t frames) override;
+    void run(const float**, float** outputs, uint32_t frames, const DISTRHO::MidiEvent* midiEvents, uint32_t midiEventsCount) override;
 
     // -------------------------------------------------------------------
 
